@@ -75,7 +75,8 @@
     #nav .snippet { display: block; font-size: 12.5px; font-weight: 400; color: var(--text-soft); margin-top: 2px; }
     #nav .empty { padding: 10px; color: var(--text-soft); font-size: 14px; }
     .side-foot { border-top: 1px solid var(--border); padding: 12px 16px; display: flex; align-items: center; gap: 8px; }
-    .side-foot .who { flex: 1; min-width: 0; font-size: 13.5px; color: var(--text-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .side-foot .who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-soft); }
+    .who .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     /* ---------- Contenido ---------- */
     main { min-width: 0; }
@@ -130,6 +131,18 @@
     #toast.show { opacity: 1; }
     .backdrop { display: none; }
 
+    /* ---------- Fotos de perfil e historial ---------- */
+    .avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex: none; display: inline-grid; place-items: center; font-size: 13px; font-weight: 600; color: #fff; background: var(--accent); }
+    .avatar.sm { width: 22px; height: 22px; font-size: 11px; }
+    .avatar.lg { width: 72px; height: 72px; font-size: 28px; }
+    .person { display: inline-flex; align-items: center; gap: 6px; }
+    .avatar-row { display: flex; align-items: center; gap: 14px; }
+    .history { margin-top: 3em; border-top: 1px solid var(--border); padding-top: 14px; }
+    .history summary { cursor: pointer; color: var(--text-soft); font-size: 14px; font-weight: 500; }
+    .history ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 10px; }
+    .history li { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text-soft); }
+    .history li b { color: var(--text); font-weight: 600; }
+
     /* ---------- Móvil ---------- */
     @media (max-width: 820px) {
       body { grid-template-columns: minmax(0,1fr); }
@@ -172,6 +185,7 @@
   <dialog id="auth">
     <h2 id="auth-title">¿Cómo te llamas?</h2>
     <form id="auth-form">
+      <div class="avatar-row"><span id="a-prev"></span><button class="btn small" id="a-photo" type="button">Elegir foto (opcional)</button></div>
       <input id="a-name" class="field" type="text" placeholder="Tu nombre de usuario" autocomplete="nickname" minlength="2" maxlength="30" required>
       <p class="err" id="a-err"></p>
       <button class="btn primary" id="a-submit" type="submit">Entrar</button>
@@ -182,6 +196,7 @@
   </dialog>
   <div id="toast" role="status"></div>
   <input type="file" id="file" multiple hidden>
+  <input type="file" id="a-file" accept="image/*" hidden>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
@@ -203,7 +218,7 @@
   const sb = supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey);
   const $ = (s) => document.querySelector(s);
   const RESERVADOS = ['nueva', 'editar'];
-  let pages = [], user = null, listo = false, slugActual = '', borrador = null;
+  let pages = [], perfiles = {}, user = null, listo = false, slugActual = '', borrador = null;
 
   /* ---------- Utilidades ---------- */
   function h(tag, attrs, ...kids) {
@@ -225,6 +240,17 @@
     const t = $('#toast'); t.textContent = msg; t.classList.add('show');
     clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 2600);
   }
+
+  const fechaHora = (d) => new Date(d).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  function avatar(id, nombre, size) {
+    const pr = perfiles[id] || {}, n = pr.nombre || nombre || '?';
+    if (pr.avatar_url && /^https:\/\//.test(pr.avatar_url))
+      return h('img', { class: 'avatar ' + (size || ''), src: pr.avatar_url, alt: n, loading: 'lazy' });
+    let hue = 0; for (const c of String(id || n)) hue = (hue * 31 + c.charCodeAt(0)) % 360;
+    return h('span', { class: 'avatar ' + (size || ''), style: 'background:hsl(' + hue + ' 45% 42%)' }, (n.trim().charAt(0) || '?').toUpperCase());
+  }
+  const nombrePerfil = (id, fallback) => (perfiles[id] && perfiles[id].nombre) || fallback || 'Alguien';
+  const persona = (id, fallback, size) => h('span', { class: 'person' }, avatar(id, fallback, size), nombrePerfil(id, fallback));
 
   DOMPurify.addHook('afterSanitizeAttributes', (n) => {
     if (n.tagName === 'A' && /^https?:/i.test(n.getAttribute('href') || '')) {
@@ -251,15 +277,33 @@
   /* ---------- Datos ---------- */
   async function cargar() {
     const { data, error } = await sb.from('pages')
-      .select('id,slug,title,category,content,author,author_id,created_at,updated_at').order('title');
+      .select('id,slug,title,category,content,author,author_id,editor_id,created_at,updated_at').order('title');
     if (error) { mostrarError(error); return false; }
-    pages = data || []; return true;
+    pages = data || [];
+    const pr = await sb.from('profiles').select('id,nombre,avatar_url');
+    perfiles = {}; (pr.data || []).forEach(x => { perfiles[x.id] = x; });
+    return true;
   }
   function mostrarError(err) {
     $('#view').replaceChildren(h('div', { class: 'card' },
       h('h2', {}, 'No se pudo cargar la wiki'),
       h('p', {}, 'Mensaje: ' + (err.message || err)),
       h('p', {}, 'Si es la primera vez, revisa que ejecutaste el código SQL en Supabase (SQL Editor).')));
+  }
+  async function asegurarPerfil() {
+    if (!user || perfiles[user.id]) return;
+    const nombre = nombreDe(user);
+    const { error } = await sb.from('profiles').upsert({ id: user.id, nombre });
+    if (!error) perfiles[user.id] = { id: user.id, nombre, avatar_url: '' };
+  }
+  async function cargarHistorial(p, ul) {
+    const { data, error } = await sb.from('page_history').select('user_id,action,created_at')
+      .eq('page_id', p.id).order('created_at', { ascending: false }).limit(30);
+    ul.replaceChildren();
+    if (error) { ul.append(h('li', {}, 'No se pudo cargar el historial.')); return; }
+    if (!data.length) { ul.append(h('li', {}, 'Sin registros todavía. Se guardan desde la próxima edición.')); return; }
+    data.forEach(r => ul.append(h('li', {}, avatar(r.user_id, '', 'sm'),
+      h('span', {}, h('b', {}, nombrePerfil(r.user_id)), ' ' + r.action + ' la página el ' + fechaHora(r.created_at)))));
   }
   function slugUnico(titulo) {
     let base = slugify(titulo), s = base, n = 2;
@@ -322,11 +366,14 @@
       h('div', { class: 'page-head' },
         h('div', {}, h('h1', {}, p.title),
           h('div', { class: 'meta' }, p.category && h('span', {}, p.category),
-            h('span', {}, 'Por ' + (p.author || 'alguien')), h('span', {}, 'Editada el ' + fecha(p.updated_at)))),
+            h('span', {}, 'Creada por ', persona(p.author_id, p.author, 'sm')), h('span', {}, 'Editada por ', persona(p.editor_id || p.author_id, p.author, 'sm'), ' el ' + fecha(p.updated_at)))),
         acciones),
       h('div', { class: 'md' }));
     v.querySelector('.md').innerHTML = mdToHtml(p.content);
     document.title = p.title + ' · ' + CONFIG.nombre;
+    const lista = h('ul', {}, h('li', {}, 'Cargando...'));
+    v.append(h('details', { class: 'history' }, h('summary', {}, 'Historial de cambios'), lista));
+    cargarHistorial(p, lista);
   }
 
   function showEditor(page) {
@@ -411,10 +458,13 @@
     let slug, error;
     if (page) {
       slug = page.slug;
-      ({ error } = await sb.from('pages').update({ title, category, content, updated_at: new Date().toISOString() }).eq('id', page.id));
+      ({ error } = await sb.from('pages').update({ title, category, content, editor_id: user.id, updated_at: new Date().toISOString() }).eq('id', page.id));
+      if (!error) await sb.from('page_history').insert({ page_id: page.id, user_id: user.id, action: 'editó' });
     } else {
       slug = borrador?.slug && !pages.some(p => p.slug === borrador.slug) ? borrador.slug : slugUnico(title);
-      ({ error } = await sb.from('pages').insert({ slug, title, category, content, author: nombreDe(user), author_id: user.id }));
+      const r = await sb.from('pages').insert({ slug, title, category, content, author: nombreDe(user), author_id: user.id, editor_id: user.id }).select('id').single();
+      error = r.error;
+      if (!error) await sb.from('page_history').insert({ page_id: r.data.id, user_id: user.id, action: 'creó' });
     }
     btn.disabled = false;
     if (error) { toast('Error: ' + error.message); return; }
@@ -429,41 +479,82 @@
     toast('Página eliminada'); await cargar(); irA('#/');
   }
 
-  /* ---------- Cuenta (solo nombre de usuario) ---------- */
+  /* ---------- Perfil (nombre y foto) ---------- */
+  let fotoPendiente = null;   // foto elegida; se sube al guardar
+  function pintarVistaPrevia() {
+    const box = $('#a-prev'); box.replaceChildren();
+    if (fotoPendiente) box.append(h('img', { class: 'avatar lg', src: URL.createObjectURL(fotoPendiente), alt: 'Vista previa' }));
+    else box.append(avatar(user && user.id, $('#a-name').value.trim() || (user ? nombreDe(user) : '?'), 'lg'));
+  }
+  function reducirImagen(file, lado = 256) {
+    return new Promise((ok, fail) => {
+      const img = new Image(), url = URL.createObjectURL(file);
+      img.onload = () => {
+        const m = Math.min(img.width, img.height), c = document.createElement('canvas');
+        c.width = c.height = lado;
+        c.getContext('2d').drawImage(img, (img.width - m) / 2, (img.height - m) / 2, m, m, 0, 0, lado, lado);
+        URL.revokeObjectURL(url);
+        c.toBlob(b => b ? ok(b) : fail(new Error('No se pudo procesar la imagen')), 'image/jpeg', 0.85);
+      };
+      img.onerror = () => fail(new Error('Esa imagen no se puede leer'));
+      img.src = url;
+    });
+  }
   function abrirAuth() {
-    $('#auth-title').textContent = user ? 'Cambiar nombre' : '¿Cómo te llamas?';
-    $('#a-submit').textContent = user ? 'Guardar nombre' : 'Entrar';
+    fotoPendiente = null;
+    $('#auth-title').textContent = user ? 'Tu perfil' : '¿Cómo te llamas?';
+    $('#a-submit').textContent = user ? 'Guardar' : 'Entrar';
     $('#a-err').textContent = '';
     let guardado = '';
     try { guardado = localStorage.getItem('wiki-nombre') || ''; } catch (e) {}
-    $('#a-name').value = user ? nombreDe(user) : guardado;
+    $('#a-name').value = user ? nombrePerfil(user.id, nombreDe(user)) : guardado;
+    pintarVistaPrevia();
     $('#auth').showModal(); $('#a-name').focus(); $('#a-name').select();
   }
   $('#a-close').onclick = () => $('#auth').close();
+  $('#a-photo').onclick = () => $('#a-file').click();
+  $('#a-file').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) { fotoPendiente = f; pintarVistaPrevia(); } };
+  $('#a-name').addEventListener('input', () => { if (!fotoPendiente) pintarVistaPrevia(); });
+
   $('#auth-form').onsubmit = async (e) => {
     e.preventDefault();
-    const nombre = $('#a-name').value.trim(), err = $('#a-err');
+    const nombre = $('#a-name').value.trim(), err = $('#a-err'), btn = $('#a-submit');
     if (nombre.length < 2) { err.textContent = 'Escribe al menos 2 letras.'; return; }
-    err.textContent = ''; $('#a-submit').disabled = true;
-    let r;
-    if (user) r = await sb.auth.updateUser({ data: { nombre } });
-    else r = await sb.auth.signInAnonymously({ options: { data: { nombre } } });
-    $('#a-submit').disabled = false;
+    err.textContent = ''; btn.disabled = true;
+    const r = user ? await sb.auth.updateUser({ data: { nombre } })
+                   : await sb.auth.signInAnonymously({ options: { data: { nombre } } });
     if (r.error) {
+      btn.disabled = false;
       err.textContent = /anonymous/i.test(r.error.message)
         ? 'Falta activar "Allow anonymous sign-ins" en Supabase (Authentication → Sign In / Providers).'
         : r.error.message;
       return;
     }
-    try { localStorage.setItem('wiki-nombre', nombre); } catch (e2) {}
     if (r.data.user) user = r.data.user;
-    setUser(user);
-    $('#auth').close(); toast('Hola, ' + nombre);
+    let avatar_url = (perfiles[user.id] && perfiles[user.id].avatar_url) || '', aviso = '';
+    if (fotoPendiente) {
+      try {
+        const blob = await reducirImagen(fotoPendiente);
+        const ruta = user.id + '/avatar-' + Date.now() + '.jpg';
+        const up = await sb.storage.from(CONFIG.bucket).upload(ruta, blob, { contentType: 'image/jpeg' });
+        if (up.error) throw up.error;
+        avatar_url = sb.storage.from(CONFIG.bucket).getPublicUrl(ruta).data.publicUrl;
+      } catch (e2) { aviso = ' (la foto falló: ' + (e2.message || e2) + ')'; }
+    }
+    const pf = await sb.from('profiles').upsert({ id: user.id, nombre, avatar_url, updated_at: new Date().toISOString() });
+    btn.disabled = false;
+    if (pf.error) { err.textContent = 'No se pudo guardar el perfil: ' + pf.error.message; return; }
+    perfiles[user.id] = { id: user.id, nombre, avatar_url };
+    try { localStorage.setItem('wiki-nombre', nombre); } catch (e3) {}
+    setUser(user); route();
+    $('#auth').close(); toast('Perfil guardado' + aviso);
   };
   function setUser(u) {
     user = u;
-    $('#who').textContent = u ? nombreDe(u) : 'Sin nombre';
-    const b = $('#btn-auth'); b.textContent = u ? 'Cambiar nombre' : 'Entrar';
+    const who = $('#who'); who.replaceChildren();
+    if (u) who.append(avatar(u.id, nombreDe(u), 'sm'), h('span', { class: 'nm' }, nombrePerfil(u.id, nombreDe(u))));
+    else who.append(h('span', { class: 'nm' }, 'Sin nombre'));
+    const b = $('#btn-auth'); b.textContent = u ? 'Perfil' : 'Entrar';
     b.onclick = abrirAuth;
   }
   $('#btn-new').onclick = () => { if (!user) return abrirAuth(); borrador = null; irA('#/nueva'); };
@@ -498,9 +589,10 @@
     $('#brand').textContent = CONFIG.nombre; $('#brand-m').textContent = CONFIG.nombre;
     const { data: { session } } = await sb.auth.getSession();
     setUser(session?.user || null);
-    sb.auth.onAuthStateChange((_ev, s) => { setUser(s?.user || null); route(); });
+    sb.auth.onAuthStateChange((_ev, s) => { setUser(s?.user || null); route(); setTimeout(async () => { await asegurarPerfil(); setUser(user); }, 0); });
     const ok = await cargar();
     if (!ok) return;
+    await asegurarPerfil(); setUser(user);
     listo = true; route();
   })();
   </script>
