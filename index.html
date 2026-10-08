@@ -170,15 +170,12 @@
   </main>
 
   <dialog id="auth">
-    <h2 id="auth-title">Entrar</h2>
+    <h2 id="auth-title">¿Cómo te llamas?</h2>
     <form id="auth-form">
-      <input id="a-name" class="field" type="text" placeholder="Tu nombre" autocomplete="nickname" hidden>
-      <input id="a-email" class="field" type="email" placeholder="Correo" autocomplete="email" required>
-      <input id="a-pass" class="field" type="password" placeholder="Contraseña (mínimo 6)" autocomplete="current-password" minlength="6" required>
+      <input id="a-name" class="field" type="text" placeholder="Tu nombre de usuario" autocomplete="nickname" minlength="2" maxlength="30" required>
       <p class="err" id="a-err"></p>
       <button class="btn primary" id="a-submit" type="submit">Entrar</button>
-      <div style="display:flex;justify-content:space-between">
-        <button class="link" id="a-switch" type="button">Crear una cuenta</button>
+      <div style="display:flex;justify-content:flex-end">
         <button class="link" id="a-close" type="button">Cerrar</button>
       </div>
     </form>
@@ -222,7 +219,7 @@
   const norm = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const slugify = (s) => norm(s).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'pagina';
   const fecha = (d) => new Date(d).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' });
-  const nombreDe = (u) => u ? (u.user_metadata?.nombre || (u.email || '').split('@')[0]) : '';
+  const nombreDe = (u) => u ? (u.user_metadata?.nombre || 'Anónimo') : '';
   let tt;
   function toast(msg) {
     const t = $('#toast'); t.textContent = msg; t.classList.add('show');
@@ -319,7 +316,7 @@
     const soyAutor = user && p.author_id === user.id;
     const acciones = h('div', { class: 'actions' },
       user ? h('button', { class: 'btn', onclick: () => irA('#/editar/' + p.slug) }, 'Editar')
-           : h('button', { class: 'btn', onclick: abrirAuth }, 'Entrar para editar'),
+           : h('button', { class: 'btn', onclick: abrirAuth }, 'Poner mi nombre para editar'),
       soyAutor && h('button', { class: 'btn danger', onclick: () => borrar(p) }, 'Eliminar'));
     v.append(
       h('div', { class: 'page-head' },
@@ -432,37 +429,42 @@
     toast('Página eliminada'); await cargar(); irA('#/');
   }
 
-  /* ---------- Cuenta ---------- */
-  let modoRegistro = false;
-  function setModo(reg) {
-    modoRegistro = reg;
-    $('#auth-title').textContent = reg ? 'Crear cuenta' : 'Entrar';
-    $('#a-submit').textContent = reg ? 'Crear cuenta' : 'Entrar';
-    $('#a-switch').textContent = reg ? 'Ya tengo cuenta' : 'Crear una cuenta';
-    $('#a-name').hidden = !reg; $('#a-name').required = reg;
-    $('#a-pass').autocomplete = reg ? 'new-password' : 'current-password';
+  /* ---------- Cuenta (solo nombre de usuario) ---------- */
+  function abrirAuth() {
+    $('#auth-title').textContent = user ? 'Cambiar nombre' : '¿Cómo te llamas?';
+    $('#a-submit').textContent = user ? 'Guardar nombre' : 'Entrar';
     $('#a-err').textContent = '';
+    let guardado = '';
+    try { guardado = localStorage.getItem('wiki-nombre') || ''; } catch (e) {}
+    $('#a-name').value = user ? nombreDe(user) : guardado;
+    $('#auth').showModal(); $('#a-name').focus(); $('#a-name').select();
   }
-  function abrirAuth() { setModo(false); $('#auth').showModal(); $('#a-email').focus(); }
-  $('#a-switch').onclick = () => setModo(!modoRegistro);
   $('#a-close').onclick = () => $('#auth').close();
   $('#auth-form').onsubmit = async (e) => {
     e.preventDefault();
-    const email = $('#a-email').value.trim(), password = $('#a-pass').value, err = $('#a-err');
+    const nombre = $('#a-name').value.trim(), err = $('#a-err');
+    if (nombre.length < 2) { err.textContent = 'Escribe al menos 2 letras.'; return; }
     err.textContent = ''; $('#a-submit').disabled = true;
     let r;
-    if (modoRegistro) r = await sb.auth.signUp({ email, password, options: { data: { nombre: $('#a-name').value.trim() } } });
-    else r = await sb.auth.signInWithPassword({ email, password });
+    if (user) r = await sb.auth.updateUser({ data: { nombre } });
+    else r = await sb.auth.signInAnonymously({ options: { data: { nombre } } });
     $('#a-submit').disabled = false;
-    if (r.error) { err.textContent = r.error.message; return; }
-    if (modoRegistro && !r.data.session) { err.textContent = 'Revisa tu correo para confirmar la cuenta.'; return; }
-    $('#auth').close(); toast('Hola, ' + nombreDe(r.data.user || r.data.session?.user));
+    if (r.error) {
+      err.textContent = /anonymous/i.test(r.error.message)
+        ? 'Falta activar "Allow anonymous sign-ins" en Supabase (Authentication → Sign In / Providers).'
+        : r.error.message;
+      return;
+    }
+    try { localStorage.setItem('wiki-nombre', nombre); } catch (e2) {}
+    if (r.data.user) user = r.data.user;
+    setUser(user);
+    $('#auth').close(); toast('Hola, ' + nombre);
   };
   function setUser(u) {
     user = u;
-    $('#who').textContent = u ? nombreDe(u) : 'Sin sesión';
-    const b = $('#btn-auth'); b.textContent = u ? 'Salir' : 'Entrar';
-    b.onclick = u ? async () => { await sb.auth.signOut(); toast('Sesión cerrada'); } : abrirAuth;
+    $('#who').textContent = u ? nombreDe(u) : 'Sin nombre';
+    const b = $('#btn-auth'); b.textContent = u ? 'Cambiar nombre' : 'Entrar';
+    b.onclick = abrirAuth;
   }
   $('#btn-new').onclick = () => { if (!user) return abrirAuth(); borrador = null; irA('#/nueva'); };
 
