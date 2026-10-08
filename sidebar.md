@@ -1,5 +1,5 @@
 - [Inicio](README.md)
-- Música
-  - [Canciones favoritas](musica.md)
+- Software
+  - [Discord](discord.md)
 - Juegos
-  - [Juegos que jugamos](juegos.md)
+  - [Paginas](juegos.md)
