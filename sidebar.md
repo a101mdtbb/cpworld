@@ -1,0 +1,5 @@
+- [Inicio](README.md)
+- Música
+  - [Canciones favoritas](musica.md)
+- Juegos
+  - [Juegos que jugamos](juegos.md)
